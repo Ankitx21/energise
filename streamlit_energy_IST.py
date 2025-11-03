@@ -102,7 +102,8 @@ def predict_high_res_next_24_hours(latitude, longitude, start_time):
             model_predictions = []
             for model in models:
                 # Night-time zeroing (6 pm – 6 am) stays the same
-                pred = 0 if (hour <= 5 or hour >= 18) else model.predict(features_df)[0]
+                # pred = 0 if (hour <= 5 or hour >= 18) else model.predict(features_df)[0]
+                pred = model.predict(features_df)[0]
                 # **Clip only negative values**
                 pred = max(pred, 0.0)
                 model_predictions.append(pred)
@@ -265,4 +266,5 @@ def main():
             )
 
 if __name__ == "__main__":
+
     main()
