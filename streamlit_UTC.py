@@ -221,6 +221,9 @@ def calculate_energy_and_plot(df, date_str):
 # -------------------------------------------------
 # 6. Streamlit UI
 # -------------------------------------------------
+# -------------------------------------------------
+# 6. Streamlit UI (FIXED)
+# -------------------------------------------------
 def main():
     st.set_page_config(page_title="Solar Forecast (UTC)", layout="wide")
     st.title("Solar Irradiance Forecast – Universal (UTC)")
@@ -276,20 +279,26 @@ def main():
 
             st.pyplot(fig)
 
-            # === FIXED: Keep datetime as UTC-aware until final formatting ===
-            csv_df = energy_df.copy()
+            # === FIXED: Separate forecast rows and total row ===
+            # Split: forecast rows (datetime is real) + total row (datetime = "Total")
+            forecast_rows = energy_df[energy_df['datetime'] != 'Total'].copy()
+            total_row = energy_df[energy_df['datetime'] == 'Total'].copy()
 
-            # Convert datetime to UTC-aware if not already
-            if not pd.api.types.is_datetime64_any_dtype(csv_df['datetime']):
-                csv_df['datetime'] = pd.to_datetime(csv_df['datetime'], utc=True)
-            else:
-                csv_df['datetime'] = csv_df['datetime'].dt.tz_localize('UTC') if csv_df['datetime'].dt.tz is None else csv_df['datetime']
-
-            # Apply user-selected timezone for CSV
+            # Convert only forecast rows to datetime + apply TZ
+            forecast_rows['datetime'] = pd.to_datetime(forecast_rows['datetime'], utc=True)
             if display_tz != "UTC":
-                csv_df['datetime'] = csv_df['datetime'].dt.tz_convert(display_tz)
-            # Format as string
-            csv_df['datetime'] = csv_df['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                forecast_rows['datetime'] = forecast_rows['datetime'].dt.tz_convert(display_tz)
+            forecast_rows['datetime'] = forecast_rows['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Total row: keep "Total" as string
+            total_row['datetime'] = 'Total'
+
+            # Recombine
+            csv_df = pd.concat([forecast_rows, total_row], ignore_index=True)
+
+            # Ensure correct column order
+            csv_df = csv_df[['datetime', 'Lower_Bound', 'Mean', 'Upper_Bound',
+                             'lower_energy', 'mean_energy', 'upper_energy']]
 
             csv_buffer = io.StringIO()
             csv_df.to_csv(csv_buffer, index=False)
@@ -301,6 +310,3 @@ def main():
             )
 
             st.success(f"Forecast ready! Times in CSV: **{display_tz}**")
-
-if __name__ == "__main__":
-    main()
