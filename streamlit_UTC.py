@@ -145,9 +145,7 @@ def predict_high_res_next_24_hours(latitude, longitude, start_utc):
         st.error("No predictions made.")
         return pd.DataFrame()
 
-    forecast_df = pd.DataFrame(prediction_results)
-    # Keep as UTC-aware datetime for time conversion
-    return forecast_df
+    return pd.DataFrame(prediction_results)
 
 # -------------------------------------------------
 # 4. Statistics
@@ -219,10 +217,7 @@ def calculate_energy_and_plot(df, date_str):
     return energy_df, fig
 
 # -------------------------------------------------
-# 6. Streamlit UI
-# -------------------------------------------------
-# -------------------------------------------------
-# 6. Streamlit UI (FIXED)
+# 6. Streamlit UI (FIXED: Handle "Total" row)
 # -------------------------------------------------
 def main():
     st.set_page_config(page_title="Solar Forecast (UTC)", layout="wide")
@@ -279,24 +274,21 @@ def main():
 
             st.pyplot(fig)
 
-            # === FIXED: Separate forecast rows and total row ===
-            # Split: forecast rows (datetime is real) + total row (datetime = "Total")
+            # === FIXED: Split forecast rows and total row ===
             forecast_rows = energy_df[energy_df['datetime'] != 'Total'].copy()
             total_row = energy_df[energy_df['datetime'] == 'Total'].copy()
 
-            # Convert only forecast rows to datetime + apply TZ
+            # Convert only forecast rows
             forecast_rows['datetime'] = pd.to_datetime(forecast_rows['datetime'], utc=True)
             if display_tz != "UTC":
                 forecast_rows['datetime'] = forecast_rows['datetime'].dt.tz_convert(display_tz)
             forecast_rows['datetime'] = forecast_rows['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Total row: keep "Total" as string
+            # Keep "Total" as string
             total_row['datetime'] = 'Total'
 
             # Recombine
             csv_df = pd.concat([forecast_rows, total_row], ignore_index=True)
-
-            # Ensure correct column order
             csv_df = csv_df[['datetime', 'Lower_Bound', 'Mean', 'Upper_Bound',
                              'lower_energy', 'mean_energy', 'upper_energy']]
 
@@ -310,3 +302,6 @@ def main():
             )
 
             st.success(f"Forecast ready! Times in CSV: **{display_tz}**")
+
+if __name__ == "__main__":
+    main()
