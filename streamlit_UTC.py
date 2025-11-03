@@ -61,17 +61,13 @@ def solar_time_correction(longitude, standard_meridian, day_of_year):
     return (4 * (longitude - standard_meridian) + eot) / 60
 
 def calculate_extraterrestrial_radiation(latitude, longitude, timestamp_utc):
-    """
-    timestamp_utc: UTC-aware datetime
-    """
     day_of_year = timestamp_utc.timetuple().tm_yday
     hour, minute, second = timestamp_utc.hour, timestamp_utc.minute, timestamp_utc.second
     latitude_rad = deg_to_rad(latitude)
     declination = calculate_declination(day_of_year)
     declination_rad = deg_to_rad(declination)
 
-    # UTC → longitude-based solar time
-    standard_meridian = 0  # UTC meridian is 0°
+    standard_meridian = 0  # UTC
     solar_time = (hour + minute/60 + second/3600 +
                   solar_time_correction(longitude, standard_meridian, day_of_year))
     hour_angle = calculate_hour_angle(solar_time)
@@ -117,7 +113,7 @@ def predict_high_res_next_24_hours(latitude, longitude, start_utc):
             model_predictions = []
             for model in models:
                 pred = 0 if (hour <= 5 or hour >= 18) else model.predict(features_df)[0]
-                pred = max(pred, 0.0)  # clip only negatives
+                pred = max(pred, 0.0)
                 model_predictions.append(pred)
 
             mean_pred = np.mean(model_predictions)
@@ -150,12 +146,11 @@ def predict_high_res_next_24_hours(latitude, longitude, start_utc):
         return pd.DataFrame()
 
     forecast_df = pd.DataFrame(prediction_results)
-    forecast_df["datetime"] = forecast_df["datetime"].dt.tz_convert(None)  # naive for consistency
-    forecast_df["datetime"] = forecast_df["datetime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    # Keep as UTC-aware datetime for time conversion
     return forecast_df
 
 # -------------------------------------------------
-# 4. Statistics (95% CI, clip negatives only)
+# 4. Statistics
 # -------------------------------------------------
 def add_statistics_columns(df):
     model_cols = [c for c in df.columns if c.lower().startswith('model_') and c.lower().endswith('_pred')]
@@ -237,7 +232,7 @@ def main():
     with col2:
         longitude = st.text_input("Longitude", value="77.43551506633048")
 
-    # Timezone selector for CSV display
+    # Timezone selector
     common_timezones = [
         'UTC', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore',
         'Europe/London', 'Europe/Paris', 'Europe/Berlin',
@@ -281,19 +276,20 @@ def main():
 
             st.pyplot(fig)
 
-            # CSV with optional timezone
+            # === FIXED: Keep datetime as UTC-aware until final formatting ===
             csv_df = energy_df.copy()
-            csv_df['datetime'] = pd.to_datetime(csv_df['datetime'])
 
-            if display_tz != "UTC":
-                csv_df['datetime'] = (
-                    csv_df['datetime']
-                    .dt.tz_localize('UTC')
-                    .dt.tz_convert(display_tz)
-                    .dt.strftime("%Y-%m-%d %H:%M:%S")
-                )
+            # Convert datetime to UTC-aware if not already
+            if not pd.api.types.is_datetime64_any_dtype(csv_df['datetime']):
+                csv_df['datetime'] = pd.to_datetime(csv_df['datetime'], utc=True)
             else:
-                csv_df['datetime'] = csv_df['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
+                csv_df['datetime'] = csv_df['datetime'].dt.tz_localize('UTC') if csv_df['datetime'].dt.tz is None else csv_df['datetime']
+
+            # Apply user-selected timezone for CSV
+            if display_tz != "UTC":
+                csv_df['datetime'] = csv_df['datetime'].dt.tz_convert(display_tz)
+            # Format as string
+            csv_df['datetime'] = csv_df['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
 
             csv_buffer = io.StringIO()
             csv_df.to_csv(csv_buffer, index=False)
