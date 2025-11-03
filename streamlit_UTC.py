@@ -7,6 +7,7 @@ import datetime
 import pytz
 import os
 import io
+from timezonefinder import TimezoneFinder
 
 # ===== Directory Configuration =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +21,20 @@ models = []
 model_names = []
 
 # -------------------------------------------------
-# 1. Load Models
+# 1. Auto-detect Local Timezone from Coordinates
+# -------------------------------------------------
+def get_local_timezone(lat, lon):
+    """Get timezone name from latitude/longitude"""
+    tf = TimezoneFinder()
+    tz_name = tf.timezone_at(lat=lat, lng=lon)
+    if tz_name is None:
+        tz_name = tf.closest_timezone_at(lat=lat, lng=lon)
+    if tz_name is None:
+        tz_name = "UTC"  # fallback
+    return tz_name
+
+# -------------------------------------------------
+# 2. Load Models
 # -------------------------------------------------
 def load_models():
     global models, model_names
@@ -42,7 +56,7 @@ def load_models():
         st.error(f"No models found in {MODELS_DIR}. Please add .pkl files.")
 
 # -------------------------------------------------
-# 2. Solar Geometry (UTC-based)
+# 3. Solar Geometry (UTC-based)
 # -------------------------------------------------
 SOLAR_CONSTANT = 1367
 
@@ -79,7 +93,7 @@ def calculate_extraterrestrial_radiation(latitude, longitude, timestamp_utc):
     return SOLAR_CONSTANT * max(cos_zenith_angle, 0)
 
 # -------------------------------------------------
-# 3. 24-Hour Prediction (UTC)
+# 4. 24-Hour Prediction (Starts at 6 AM Local)
 # -------------------------------------------------
 def predict_high_res_next_24_hours(latitude, longitude, start_utc):
     global models, model_names
@@ -148,7 +162,7 @@ def predict_high_res_next_24_hours(latitude, longitude, start_utc):
     return pd.DataFrame(prediction_results)
 
 # -------------------------------------------------
-# 4. Statistics
+# 5. Statistics
 # -------------------------------------------------
 def add_statistics_columns(df):
     model_cols = [c for c in df.columns if c.lower().startswith('model_') and c.lower().endswith('_pred')]
@@ -169,7 +183,7 @@ def add_statistics_columns(df):
     return df
 
 # -------------------------------------------------
-# 5. Energy & 24-Hour Plot
+# 6. Energy & 24-Hour Plot
 # -------------------------------------------------
 def calculate_energy_and_plot(df, date_str):
     interval = 1.0
@@ -208,38 +222,29 @@ def calculate_energy_and_plot(df, date_str):
                     plot_df['Lower_Bound'], plot_df['Upper_Bound'],
                     color='#ff7f0e', alpha=0.3, label='95% Prediction Band')
 
-    ax.set_xlabel('Datetime (UTC)')
+    ax.set_xlabel('Time (UTC)')
     ax.set_ylabel('Irradiance (W/m²)')
-    ax.set_title('24-Hour Solar Irradiance Forecast (UTC)')
+    ax.set_title(f'24-Hour Solar Forecast - {date_str}')
     ax.legend()
     ax.tick_params(axis='x', rotation=45)
     plt.tight_layout()
     return energy_df, fig
 
 # -------------------------------------------------
-# 6. Streamlit UI (FIXED: Handle "Total" row)
+# 7. Main App - LOCAL 6 AM to 6 PM
 # -------------------------------------------------
 def main():
-    st.set_page_config(page_title="Solar Forecast (UTC)", layout="wide")
-    st.title("Solar Irradiance Forecast – Universal (UTC)")
-    st.write("Enter coordinates for a **24-hour UTC-based** solar forecast.")
+    st.set_page_config(page_title="Solar Forecast Local", layout="wide")
+    st.title("🌞 Solar Irradiance Forecast")
+    st.markdown("**Enter coordinates → Get 6 AM to 6 PM LOCAL TIME forecast**")
 
     col1, col2 = st.columns(2)
     with col1:
-        latitude = st.text_input("Latitude", value="12.92142594422952")
+        latitude = st.text_input("Latitude", value="35.6762")  # Tokyo default
     with col2:
-        longitude = st.text_input("Longitude", value="77.43551506633048")
+        longitude = st.text_input("Longitude", value="139.6503")  # Tokyo default
 
-    # Timezone selector
-    common_timezones = [
-        'UTC', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore',
-        'Europe/London', 'Europe/Paris', 'Europe/Berlin',
-        'America/New_York', 'America/Chicago', 'America/Los_Angeles',
-        'Australia/Sydney', 'Asia/Tokyo'
-    ]
-    display_tz = st.selectbox("Display CSV times in:", options=common_timezones, index=0)
-
-    if st.button("Generate Forecast"):
+    if st.button("🚀 Generate Local 6 AM - 6 PM Forecast"):
         try:
             lat = float(latitude)
             lon = float(longitude)
@@ -247,23 +252,32 @@ def main():
                 st.error("Invalid coordinates.")
                 return
         except ValueError:
-            st.error("Enter numeric values.")
+            st.error("Enter numbers only.")
             return
 
-        load_models()
+        with st.spinner("Loading models..."):
+            load_models()
         if not models:
             st.error("No models found in '34_models_all' folder.")
             return
 
-        # Tomorrow at 00:00 UTC
-        tomorrow = (datetime.datetime.now(datetime.timezone.utc).date() + datetime.timedelta(days=1))
-        forecast_start_utc = datetime.datetime(
-            tomorrow.year, tomorrow.month, tomorrow.day,
-            0, 0, tzinfo=datetime.timezone.utc
-        )
-        date_str = forecast_start_utc.strftime("%Y-%m-%d")
+        # === AUTO-DETECT LOCAL TIMEZONE ===
+        local_tz_name = get_local_timezone(lat, lon)
+        local_tz = pytz.timezone(local_tz_name)
+        
+        st.info(f"**Detected timezone: {local_tz_name}**")
 
-        with st.spinner("Generating 24-hour UTC forecast..."):
+        # === START FORECAST AT 6 AM LOCAL TOMORROW ===
+        tomorrow_local = datetime.datetime.now(local_tz).date() + datetime.timedelta(days=1)
+        forecast_start_local = datetime.datetime(
+            tomorrow_local.year, tomorrow_local.month, tomorrow_local.day,
+            6, 0, tzinfo=local_tz  # 6 AM LOCAL
+        )
+        forecast_start_utc = forecast_start_local.astimezone(pytz.UTC)
+
+        date_str = forecast_start_local.strftime("%Y-%m-%d")
+
+        with st.spinner("Generating local forecast..."):
             forecast_df = predict_high_res_next_24_hours(lat, lon, forecast_start_utc)
             if forecast_df.empty:
                 st.error("Failed to generate forecast.")
@@ -272,36 +286,34 @@ def main():
             forecast_df = add_statistics_columns(forecast_df)
             energy_df, fig = calculate_energy_and_plot(forecast_df, date_str)
 
-            st.pyplot(fig)
+        st.pyplot(fig)
 
-            # === FIXED: Split forecast rows and total row ===
-            forecast_rows = energy_df[energy_df['datetime'] != 'Total'].copy()
-            total_row = energy_df[energy_df['datetime'] == 'Total'].copy()
+        # === CSV IN LOCAL TIME ===
+        forecast_rows = energy_df[energy_df['datetime'] != 'Total'].copy()
+        total_row = energy_df[energy_df['datetime'] == 'Total'].copy()
 
-            # Convert only forecast rows
-            forecast_rows['datetime'] = pd.to_datetime(forecast_rows['datetime'], utc=True)
-            if display_tz != "UTC":
-                forecast_rows['datetime'] = forecast_rows['datetime'].dt.tz_convert(display_tz)
-            forecast_rows['datetime'] = forecast_rows['datetime'].dt.strftime("%Y-%m-%d %H:%M:%S")
+        # Convert to LOCAL TIME
+        forecast_rows['datetime'] = pd.to_datetime(forecast_rows['datetime'], utc=True)
+        forecast_rows['datetime'] = forecast_rows['datetime'].dt.tz_convert(local_tz)
+        forecast_rows['datetime'] = forecast_rows['datetime'].dt.strftime("%Y-%m-%d %H:%M")
 
-            # Keep "Total" as string
-            total_row['datetime'] = 'Total'
+        total_row['datetime'] = 'Total'
 
-            # Recombine
-            csv_df = pd.concat([forecast_rows, total_row], ignore_index=True)
-            csv_df = csv_df[['datetime', 'Lower_Bound', 'Mean', 'Upper_Bound',
-                             'lower_energy', 'mean_energy', 'upper_energy']]
+        csv_df = pd.concat([forecast_rows, total_row], ignore_index=True)
+        csv_df = csv_df[['datetime', 'Lower_Bound', 'Mean', 'Upper_Bound',
+                         'lower_energy', 'mean_energy', 'upper_energy']]
 
-            csv_buffer = io.StringIO()
-            csv_df.to_csv(csv_buffer, index=False)
-            st.download_button(
-                label="Download Forecast CSV",
-                data=csv_buffer.getvalue(),
-                file_name=f"solar_forecast_{date_str}_UTC.csv",
-                mime="text/csv"
-            )
+        csv_buffer = io.StringIO()
+        csv_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label="📥 Download Local Time CSV",
+            data=csv_buffer.getvalue(),
+            file_name=f"solar_forecast_{date_str}_{local_tz_name}.csv",
+            mime="text/csv"
+        )
 
-            st.success(f"Forecast ready! Times in CSV: **{display_tz}**")
+        st.success(f"✅ **Done!** 6 AM to 6 PM forecast in **{local_tz_name}** time")
+        st.balloons()
 
 if __name__ == "__main__":
     main()
