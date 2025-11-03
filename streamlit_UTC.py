@@ -14,8 +14,7 @@ from timezonefinder import TimezoneFinder
 # ----------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "34_models_all")
-for directory in [MODELS_DIR]:
-    os.makedirs(directory, exist_ok=True)
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 # ----------------------------------------------------------------------
 # Global variables
@@ -113,24 +112,31 @@ def predict_24h(lat, lon, start_utc):
         preds = []
         for m in models:
             p = m.predict(feats)[0] if is_day else 0.0
-            preds.append(max(p, 0.0))
+            preds.append(max(p, 0.0))               # <-- force >= 0
 
         mean = np.mean(preds)
+        std  = np.std(preds)
+
+        # ---- CLIP EVERYTHING TO >= 0 ---------------------------------
+        lower = max(mean - 1.96 * std, 0.0)
+        upper = max(mean + 1.96 * std, 0.0)
+        mean  = max(mean, 0.0)
+
         rows.append({
             "datetime": utc_dt,
             "extraterrestrial": round(ext, 2),
             "cloudcover": round(cloud, 2),
             "Mean": round(mean, 2),
-            "Lower_Bound": round(mean - 1.96 * np.std(preds), 2),
-            "Upper_Bound": round(mean + 1.96 * np.std(preds), 2),
-            "lower_energy": round(mean - 1.96 * np.std(preds), 2),
-            "mean_energy": round(mean, 2),
-            "upper_energy": round(mean + 1.96 * np.std(preds), 2),
+            "Lower_Bound": round(lower, 2),
+            "Upper_Bound": round(upper, 2),
+            "lower_energy": round(lower, 2),
+            "mean_energy":  round(mean, 2),
+            "upper_energy": round(upper, 2),
         })
     return pd.DataFrame(rows)
 
 # ----------------------------------------------------------------------
-# 5. Plot in local time
+# 5. Plot in local time (no negative values)
 # ----------------------------------------------------------------------
 def plot_local(df, date_str, tz_name):
     df_plot = df.copy()
